@@ -1,0 +1,51 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    region: us-east-1
+    prefix: staging
+
+  tasks:
+    - name: get vpc id information
+      command: "aws ec2 describe-vpcs --filters Name=tag:Name,Values={{ prefix }}_vpc" 
+      register: vpc_info
+      changed_when: False
+
+    - name: set vpc id json information into variable
+      set_fact: 
+        vpc_info_json: "{{ vpc_info.stdout | from_json }}"
+      changed_when: False
+
+    - name: setup aws VPC id cli varables 
+      set_fact: 
+        VpcId: "{{ vpc_info_json.Vpcs[0].VpcId }}"
+      when: vpc_info_json.Vpcs[0].VpcId is defined
+
+    - name: get vpc subnet ids for the private subnets
+      command: 'aws ec2 describe-subnets --filters "Name=vpc-id,Values={{ VpcId }}" "Name=tag:Name,Values={{ prefix }}_subnet_private_*"'
+      register: vpc_subnet_info
+      changed_when: False
+
+    - name: set vpc subnet id json information into variable
+      set_fact: 
+        vpc_subnet_info_json: "{{ vpc_subnet_info.stdout | from_json }}" 
+      changed_when: False
+
+    - name: setup subnet id cli varables 
+      set_fact: 
+        SubnetId_Priv0: "{{ vpc_subnet_info_json.Subnets[0].SubnetId }}"
+        SubnetId_Priv1: "{{ vpc_subnet_info_json.Subnets[1].SubnetId }}"
+      when: vpc_info_json.Vpcs[0].VpcId is defined
+
+    - name: create Multi-AZ DB subnet group
+      local_action:
+        module: rds_subnet_group
+        name: dbsg2
+        state: present
+        region: "{{ region }}"
+        description: DB Subnet Group 1
+        subnets:
+          - "{{ SubnetId_Priv0 }}"
+          - "{{ SubnetId_Priv1 }}"

@@ -1,0 +1,54 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    region: us-east-1
+    size: 100
+    instance_type: db.m1.small
+    db_engine: MySQL
+    engine_version: 5.6.22 
+    subnet: dbsg2
+    parameter_group: mysqlpg1
+    iops: 1000
+    db_name: wordpress
+    username: dbadmin
+    password: mypassword
+
+  tasks:
+    - name: get sg info for DB
+      command: 'aws ec2 describe-security-groups --filters "Name=group-name,Values=staging_sg_database"'
+      register: sg_db_info
+      changed_when: False
+
+    - name: set sg info json information into variable
+      set_fact: 
+        sg_db_info_json: "{{ sg_db_info.stdout | from_json }}"
+      changed_when: False
+
+    - name: setup aws VPC id cli varables 
+      set_fact: 
+        db_security_group_id: "{{ sg_db_info_json.SecurityGroups[0].GroupId }}"
+      when: sg_db_info_json.SecurityGroups[0].GroupId is defined
+
+    - name: create mysql RDS instance
+      local_action:
+        module: rds
+        command: create
+        instance_name: staging-mysql-1
+        region: "{{ region }}"
+        size: "{{ size }}"
+        instance_type: "{{ instance_type }}"
+        db_engine: "{{ db_engine }}"
+        engine_version: "{{ engine_version }}"
+        subnet: "{{ subnet }}"
+        parameter_group: "{{ parameter_group }}"
+        multi_zone: yes
+        db_name: "{{ db_name }}"
+        username: "{{ username }}"
+        password: "{{ password }}"
+        vpc_security_groups: "{{ db_security_group_id }}"
+        iops: "{{ iops }}"
+        wait: yes
+        wait_timeout: 1800

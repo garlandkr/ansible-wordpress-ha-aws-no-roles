@@ -1,0 +1,50 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  vars:
+    #your region
+    region: us-east-1
+    #prefix for naming
+    prefix: staging
+  
+  tasks:
+    - name: get vpc information
+      command: "aws ec2 describe-vpcs --filters Name=tag:Name,Values={{ prefix }}_vpc" 
+      register: vpc_info
+      changed_when: False
+
+    - name: set vpc json information into variable
+      set_fact: 
+        vpc_info_json: "{{ vpc_info.stdout | from_json }}"
+      changed_when: False
+
+    - name: setup aws cli varables 
+      set_fact: 
+        VpcId: "{{ vpc_info_json.Vpcs[0].VpcId }}"
+      when: vpc_info_json.Vpcs[0].VpcId is defined
+
+    - name: create empty security group for webservers
+      local_action:
+        module: ec2_group
+        region: "{{ region }}"
+        vpc_id: "{{ VpcId }}"
+        name: "{{ prefix }}_sg_web"
+        description: security group for webservers
+
+    - name: create empty security group for databases
+      local_action:
+        module: ec2_group
+        region: "{{ region }}"
+        vpc_id: "{{ VpcId }}"
+        name: "{{ prefix }}_sg_database"
+        description: security group for databases
+
+    - name: create empty security group for nat
+      local_action:
+        module: ec2_group
+        region: "{{ region }}"
+        vpc_id: "{{ VpcId }}"
+        name: "{{ prefix }}_sg_nat"
+        description: security group for nat

@@ -1,0 +1,70 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  vars:
+    region: us-east-1
+    key: ansible_for_aws_jonathan
+    instance_type: t2.micro
+    image: ami-9a562df2
+    prefix: staging
+  
+  tasks:
+    - name: get vpc id information
+      command: "aws ec2 describe-vpcs --filters Name=tag:Name,Values={{ prefix }}_vpc" 
+      register: vpc_info
+      changed_when: False
+
+    - name: set vpc id json information into variable
+      set_fact: 
+        vpc_info_json: "{{ vpc_info.stdout | from_json }}"
+      changed_when: False
+
+    - name: setup aws VPC id cli varables 
+      set_fact: 
+        VpcId: "{{ vpc_info_json.Vpcs[0].VpcId }}"
+      when: vpc_info_json.Vpcs[0].VpcId is defined
+
+    - name: get vpc subnet id for the first public subnet
+      command: 'aws ec2 describe-subnets --filters "Name=vpc-id,Values={{ VpcId }}" "Name=tag:Name,Values={{ prefix }}_subnet_public_0"'
+      register: vpc_subnet_info
+      changed_when: False
+
+    - name: set vpc subnet id json information into variable
+      set_fact: 
+        vpc_subnet_info_json: "{{ vpc_subnet_info.stdout | from_json }}" 
+      changed_when: False
+
+    - name: setup subnet id cli varables 
+      set_fact: 
+        SubnetId: "{{ vpc_subnet_info_json.Subnets[0].SubnetId }}"
+      when: vpc_info_json.Vpcs[0].VpcId is defined
+
+    - name: jump box instance provisioning
+      local_action:
+        module: ec2
+        region: "{{ region }}"
+        key_name: "{{ key }}"
+        instance_type: "{{ instance_type }}"
+        image: "{{ image }}"
+        wait: yes
+        group: "{{ prefix }}_sg_jumpbox"
+        instance_tags:
+          Name: "{{ prefix }}_jumpbox"
+          class: jumpbox
+          environment: "{{ prefix }}"
+        exact_count: 1
+        count_tag:
+          Name: "{{ prefix }}_jumpbox"
+        vpc_subnet_id: "{{ SubnetId }}"
+        wait: yes
+      register: ec2
+  
+    - name: associate new EIP for the instance
+      local_action:
+        module: ec2_eip
+        region: "{{ region }}"
+        instance_id: "{{ item.id }}"
+        wait_timeout: 60
+      with_items: ec2.instances
